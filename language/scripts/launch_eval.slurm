@@ -34,7 +34,7 @@ NEED_TO_MERGE=(
 # NOTE: Use "" if not using LoRA
 BASE_MODELS=(
 )
-# TASKS="gsm8k,mmlu,arc_easy,arc_challenge,hellaswag,piqa,social_iqa,openbookqa,mbpp"
+TASKS="gsm8k,mmlu,arc_easy,arc_challenge,hellaswag,piqa,social_iqa,openbookqa,mbpp"
 
 
 BATCH_SIZE=32

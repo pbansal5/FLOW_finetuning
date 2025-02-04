@@ -1,0 +1,5 @@
+language/experiments/
+language/wandb/
+**/__pycache__/
+language/slurmlogs/
+.vscode/

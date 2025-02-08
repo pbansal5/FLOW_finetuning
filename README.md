@@ -2,7 +2,7 @@
 
 > **Upweighting Easy Samples in Fine-tuning Mitigates Forgeting**\
 > Sunny Sanyal*, Hayden Prairie*, Rudrajit Das*, Ali Kavis*, Sujay Sanghavi\
-> Paper: [INSERT PAPER] \
+> Paper: https://arxiv.org/abs/2502.02797 \
 
 ## Installing Locally
 Our language and vision experiments were run in seperate environments, and thus we have two different installations.

@@ -116,3 +116,21 @@ In each of these scripts, you can set the run configuration at the top of the sc
 ```bash
 (bash/sbatch) scripts/launch_eval.slurm
 ```
+
+## Citation
+
+If you find this work helpful, please consider citing us:
+
+```bash
+@article{sanyal2025upweighting,
+  title={Upweighting Easy Samples in Fine-Tuning Mitigates Forgetting},
+  author={Sanyal, Sunny and Prairie, Hayden and Das, Rudrajit and Kavis, Ali and Sanghavi, Sujay},
+  journal={arXiv preprint arXiv:2502.02797},
+  year={2025},
+  url={https://arxiv.org/abs/2502.02797}
+}
+```
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=sanyalsunny111/FLOW_finetuning&type=Date)](https://star-history.com/#sanyalsunny111/FLOW_finetuning&Date)

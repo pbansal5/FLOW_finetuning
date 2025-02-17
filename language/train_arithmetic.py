@@ -60,7 +60,8 @@ def create_run_directory(args):
     base_dir = args.base_dir
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_name = args.model.split("/")[-1]
-    run_name = f"{model_name}__r{args.lora_r}__lr{args.lr}__ft_{args.finetune_type}_reg_{args.weight_regularization}__train_{args.dataset_split.replace('[:','').replace(']','')}"
+    # run_name = f"{model_name}__r{args.lora_r}__lr{args.lr}__ft_{args.finetune_type}_beta_{args.beta}_reg_{args.weight_regularization}__train_{args.dataset_split.replace('[:','').replace(']','')}"
+    run_name = f"{model_name}__r{args.lora_r}__lr{args.lr}__ft_{args.finetune_type}__rw_{args.reweight_type}_beta_{args.beta}_reg_{args.weight_regularization}"
     run_dir = os.path.join(base_dir, model_name, f"{timestamp}_{run_name}")
 
     os.makedirs(run_dir, exist_ok=True)
@@ -199,11 +200,17 @@ def finetune():
                 base_model=model_copy,
                 weight_regularization=args.weight_regularization,
                 reg_lambda=args.weight_regularization_lambda,
+                beta=args.beta,
                 **data_module,
             )
         else:
             trainer = WeightedLossTrainer(
-                model=model, args=training_args, loss_type=args.reweight_type, ignore_index=IGNORE_INDEX, **data_module
+                model=model, 
+                args=training_args, 
+                loss_type=args.reweight_type, 
+                ignore_index=IGNORE_INDEX, 
+                beta=args.beta,
+                **data_module,
             )
 
     model.config.use_cache = False
@@ -249,7 +256,7 @@ if __name__ == "__main__":
         "--reweight-type",
         type=str,
         default="none",
-        choices=["none", "sequence", "token"],
+        choices=["none", "sequence", "token", "ref_logprobs"],
         help="How to reweight samples [sequence/token]-wise",
     )
     parser.add_argument(
@@ -261,6 +268,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--weight-regularization-lambda", type=float, default=0.0, help="Weight regularization strength"
+    )
+
+    parser.add_argument(
+        "--beta", type=float, default=1e-5, help="Beta for sigmoid"
     )
 
     # Model and Finetuning arguments

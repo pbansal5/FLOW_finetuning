@@ -13,33 +13,34 @@
 # Source conda environment and move to project directory (change to your own path)
 
 source $WORK/miniconda3/install/bin/activate flow
-cd /work/09753/hprairie/ls6/projects/FLOW_finetuning/language
+cd /u/pbansal/flow/FLOW_finetuning/language
 
 # NOTE: This script expects a single NODE to be used for analysis
 # Set Run Parameters
 
 # NOTE: Each GPU will run a seperate evalutation
-export CUDA_VISIBLE_DEVICES='0' # Specify which GPUs to use
+export CUDA_VISIBLE_DEVICES='1,2,3,4,5,6,7' # Specify which GPUs to use
 export HF_ALLOW_CODE_EVAL="1" # Allow eval
 
-
 # RUN_DIRS is a list to all folders with runs
-RUN_DIRS=(
+RUN_DIRS=("/var/local/pbansal/flow/floss_results/experiments/Llama-3.2-1B/20250217_105213_Llama-3.2-1B__r64__lr2e-05__ft_full__rw_none_beta_0.0_reg_none" \
+"/var/local/pbansal/flow/floss_results/experiments/Llama-3.2-1B/20250217_111743_Llama-3.2-1B__r64__lr2e-05__ft_full__rw_ref_logprobs_beta_0.01_reg_none" \
+"/var/local/pbansal/flow/floss_results/experiments/Llama-3.2-1B/20250217_114322_Llama-3.2-1B__r64__lr2e-05__ft_full__rw_ref_logprobs_beta_0.001_reg_none" \
 )
 # If model being evaluated used LoRA then set to true to merge model and LoRA weights (i.e, false/true)
 # Use false if not using LoRA
-NEED_TO_MERGE=(
+NEED_TO_MERGE=(false false false
 )
 # If model being evaluated used LoRA then name the HuggingFace model path to merge weights (i.e., ""/"google/gemma-2-2b")
 # NOTE: Use "" if not using LoRA
-BASE_MODELS=(
+BASE_MODELS=("meta-llama/Llama-3.2-1B" "meta-llama/Llama-3.2-1B" "meta-llama/Llama-3.2-1B" 
 )
 TASKS="gsm8k,mmlu,arc_easy,arc_challenge,hellaswag,piqa,social_iqa,openbookqa,mbpp"
 
 
 BATCH_SIZE=32
 METHOD="normal" # (Type of model merging done) Options: normal
-WANDB_PROJECT="project-name"
+WANDB_PROJECT="flow"
 
 #### ~~~~~~~~ Do not modify below this line ~~~~~~~~ ####
 

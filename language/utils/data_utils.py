@@ -175,6 +175,9 @@ class WeightedDataCollatorForSupervisedDataset(DataCollatorForSupervisedDataset)
             token_weights = torch.nn.utils.rnn.pad_sequence(token_weights, batch_first=True, padding_value=0)
             batch["token_weights"] = token_weights
             batch["sequence_weights"] = torch.tensor([instance["sequence_weights"] for instance in instances])
+            batch["ref_logprobs"] = torch.tensor([instance["ref_logprobs"] for instance in instances])
+        elif self.loss_type == "ref_logprobs":
+            batch["ref_logprobs"] = torch.tensor([instance["ref_logprobs"] for instance in instances])
         elif self.loss_type == "sequence":
             batch["sequence_weights"] = torch.tensor([instance["sequence_weights"] for instance in instances])
         else:  # Assume Token
@@ -231,7 +234,7 @@ def train_tokenize_function(examples, tokenizer, query, response):
 def load_and_preprocess_it(tokenizer, args):
     path = args.data_path
     split_range = None
-    if "[" in path and "]" in path:
+    if "[" in path and path.endswith("]"):
         main_path, range_str = path.split("[", 1)
         range_str = range_str.rstrip("]")  # Remove the closing bracket
         path = main_path  # Update path to the main dataset path
@@ -275,7 +278,7 @@ def load_and_preprocess_it(tokenizer, args):
 def load_weighted_it(args):
     path = args.data_path
     split_range = None
-    if "[" in path and "]" in path:
+    if "[" in path and path.endswith("]"):
         main_path, range_str = path.split("[", 1)
         range_str = range_str.rstrip("]")  # Remove the closing bracket
         path = main_path  # Update path to the main dataset path

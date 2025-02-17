@@ -12,15 +12,15 @@
 
 # Source conda environment and move to project directory
 source $WORK/miniconda3/install/bin/activate flow
-cd /work/09753/hprairie/ls6/projects/FLOW_finetuning/language
+cd /u/pbansal/flow/FLOW_finetuning/language
 
 # NOTE: This script expects a single NODE to be used for analysis
 # Job Configuration
-export CUDA_VISIBLE_DEVICES='0' # Specify which GPU to use
+export CUDA_VISIBLE_DEVICES='1,2,3,4,5,6,7' # Specify which GPU to use
 
 # ===== Model Configuration ===== #
-BASE_MODEL="google/gemma-2-2b"
-FINETUNE_TYPE="lora" # none, full, lora, linear-probe, sfa (none will freeze the entire model, which is useful for creating a baseline model)
+BASE_MODEL="meta-llama/Llama-3.2-1B"
+FINETUNE_TYPE="full" # none, full, lora, linear-probe, sfa (none will freeze the entire model, which is useful for creating a baseline model)
 
 # ~~ LORA Configuration ~~ #
 LORA_RANK=64
@@ -31,27 +31,30 @@ SFA_UPDATE_FREQ=0.25
 SFA_BETA=0.5
 
 # ===== Data Configuration ===== #
-DATASET="meta-math/MetaMathQA" # Dataset to use (expects huggingface format or path)
+DATASETS=("meta-math/MetaMathQA" \
+"/u/pbansal/flow/FLOW_finetuning/language/data/MetaMathQA/20250216_154342_MetaMathQA__llama3.2__tp0.0643_l_both" \
+"/u/pbansal/flow/FLOW_finetuning/language/data/MetaMathQA/20250216_154342_MetaMathQA__llama3.2__tp0.0643_l_both") # Dataset to use (expects huggingface format or path)
 SPLIT="train" # Split to use (expects huggingface format)
 FIELD=("query" "response") # Field to use (expects list of two strings)
 
 # ===== Reweighting Variables ===== #
-REWEIGHTING_TYPE="none" # Reweighting scheme either [sequence/token/none] (default trainer: none)
+REWEIGHTING_TYPES=("none" "ref_logprobs" "ref_logprobs") # Reweighting scheme either [sequence/token/ref_logprobs/none] (default trainer: none)
 
 # ===== Regularization Configuration ===== #
 # Note: Regularization only makes sense when using (full/linear-probe) finetuning
 REGULARIZATION_LAMBDA=1e-3 # Regularization lambda to use
 REGULARIZATION_TYPE="none" # Regularization type to use (none/l1/l2)
+BETAS=(0 1e-2 1e-3) # Sigmoid beta to use
 
 # ===== Training Configuration ===== #
 EPOCHS=2 # Number of epochs to train for
 SCHEDULER="cosine" # Scheduler to use
 WEIGHT_DECAY=0.00 # Weight decay to use
 WARMUP_RATIO=0.03 # Warmup ratio to use
-LR=1e-5 # Learning rate to use
-BATCH_SIZE=4 # Batch size to use
+LR=2e-5 # Learning rate to use
+BATCH_SIZE=2 # Batch size to use
 MAX_SEQ_LEN=1024 # Maximum sequence length to use
-GRADIENT_ACCUMULATION_STEPS=32 # Gradient accumulation steps to use
+GRADIENT_ACCUMULATION_STEPS=8 # Gradient accumulation steps to use
 GRADIENT_CHECKPOINTING=false # Use gradient checkpointing to reduce memory usage
 SEED=42 # Seed to use
 # NOTE: If using Accelerate config, set the ACCELERATE_CONFIG variable other wise leave it as "" and DDP will be used in multi-gpu training
@@ -59,13 +62,13 @@ SEED=42 # Seed to use
 # NOTE: Accelerate hasn't been tested in a bit, aviod for now
 
 # ===== Experiment Configuration ===== #
-BASE_DIR="$SCRATCH/floss_results/experiments" # Base directory for experiments
-WANDB_PROJECT="project-name" # Wandb project to use
-WAND_RUN="none" # Wandb run name to use
+BASE_DIR="/var/local/pbansal/flow/floss_results/experiments" # Base directory for experiments
+WANDB_PROJECT="flow" # Wandb project to use
+WAND_RUN="debug" # Wandb run name to use
 
 # ===== Misc Configuration ===== #
 DEBUG=false # true or false (Will turn off distributed training)
-USE_SLURM=true # true or false (Will use SLURM for distributed training)
+USE_SLURM=false # true or false (Will use SLURM for distributed training)
 
 #### ~~~~~~~~ Do not modify below this line ~~~~~~~~ ####
 MODEL_NAME=$(basename "$BASE_MODEL")
@@ -100,136 +103,144 @@ else
 fi
 
 
+for i in "${!REWEIGHTING_TYPES[@]}"; do
+    BETA="${BETAS[$i]}"
+    REWEIGHTING_TYPE="${REWEIGHTING_TYPES[$i]}"
+    DATASET="${DATASETS[$i]}"
+    if [ "$DEBUG" = false ] && [ "$NUM_GPUS" -gt 1 ]; then
+        echo "Master Address: $MASTER_ADDR"
+        echo "Master Port: $MASTER_PORT"
 
-if [ "$DEBUG" = false ] && [ "$NUM_GPUS" -gt 1 ]; then
-    echo "Master Address: $MASTER_ADDR"
-    echo "Master Port: $MASTER_PORT"
-
-    if [ -z "$ACCELERATE_CONFIG" ]; then
-        echo "=== Starting Distributed Training ==="
-        torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${NUM_GPUS} train_arithmetic.py \
-            --base-dir $BASE_DIR \
-            --data_path $DATASET \
-            --dataset_split $SPLIT \
-            --dataset_field "${FIELD[@]}" \
-            --model $BASE_MODEL \
-            --reweight-type $REWEIGHTING_TYPE \
-            --weight-regularization $REGULARIZATION_TYPE \
-            --weight-regularization-lambda $REGULARIZATION_LAMBDA \
-            --finetune-type $FINETUNE_TYPE \
-            --lora_r $LORA_RANK \
-            --lora_alpha $LORA_RANK \
-            --lora_dropout $LORA_DROPOUT \
-            --sfa-update-freq $SFA_UPDATE_FREQ \
-            --sfa-beta $SFA_BETA \
-            --batch_size $BATCH_SIZE \
-            --epochs $EPOCHS \
-            --scheduler $SCHEDULER \
-            --weight_decay $WEIGHT_DECAY \
-            --warmup_ratio $WARMUP_RATIO \
-            --max_seq_length $MAX_SEQ_LEN \
-            --lr $LR \
-            --seed $SEED \
-            --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
-            --gradient-checkpointing $GRADIENT_CHECKPOINTING \
-            --device "cuda" \
-            --project-name $WANDB_PROJECT \
-            --no-wandb $NO_WANDB \
-            --run-name $WAND_RUN
+        if [ -z "$ACCELERATE_CONFIG" ]; then
+            echo "=== Starting Distributed Training ==="
+            torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${NUM_GPUS} train_arithmetic.py \
+                --base-dir $BASE_DIR \
+                --data_path $DATASET \
+                --dataset_split $SPLIT \
+                --dataset_field "${FIELD[@]}" \
+                --model $BASE_MODEL \
+                --reweight-type $REWEIGHTING_TYPE \
+                --weight-regularization $REGULARIZATION_TYPE \
+                --weight-regularization-lambda $REGULARIZATION_LAMBDA \
+                --beta $BETA \
+                --finetune-type $FINETUNE_TYPE \
+                --lora_r $LORA_RANK \
+                --lora_alpha $LORA_RANK \
+                --lora_dropout $LORA_DROPOUT \
+                --sfa-update-freq $SFA_UPDATE_FREQ \
+                --sfa-beta $SFA_BETA \
+                --batch_size $BATCH_SIZE \
+                --epochs $EPOCHS \
+                --scheduler $SCHEDULER \
+                --weight_decay $WEIGHT_DECAY \
+                --warmup_ratio $WARMUP_RATIO \
+                --max_seq_length $MAX_SEQ_LEN \
+                --lr $LR \
+                --seed $SEED \
+                --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
+                --gradient-checkpointing $GRADIENT_CHECKPOINTING \
+                --device "cuda" \
+                --project-name $WANDB_PROJECT \
+                --no-wandb $NO_WANDB \
+                --run-name $WAND_RUN
+        else
+            echo "=== Starting Accelerated Distributed Training ==="
+            accelerate launch --config_file $ACCELERATE_CONFIG train_arithmetic.py \
+                --base-dir $BASE_DIR \
+                --data_path $DATASET \
+                --dataset_split $SPLIT \
+                --dataset_field "${FIELD[@]}" \
+                --model $BASE_MODEL \
+                --reweight-type $REWEIGHTING_TYPE \
+                --weight-regularization $REGULARIZATION_TYPE \
+                --weight-regularization-lambda $REGULARIZATION_LAMBDA \
+                --beta $BETA \
+                --finetune-type $FINETUNE_TYPE \
+                --lora_r $LORA_RANK \
+                --lora_alpha $LORA_RANK \
+                --lora_dropout $LORA_DROPOUT \
+                --sfa-update-freq $SFA_UPDATE_FREQ \
+                --sfa-beta $SFA_BETA \
+                --batch_size $BATCH_SIZE \
+                --epochs $EPOCHS \
+                --scheduler $SCHEDULER \
+                --weight_decay $WEIGHT_DECAY \
+                --warmup_ratio $WARMUP_RATIO \
+                --max_seq_length $MAX_SEQ_LEN \
+                --lr $LR \
+                --seed $SEED \
+                --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
+                --gradient-checkpointing $GRADIENT_CHECKPOINTING \
+                --device "cuda" \
+                --project-name $WANDB_PROJECT \
+                --no-wandb $NO_WANDB \
+                --run-name $WAND_RUN
+        fi
     else
-        echo "=== Starting Accelerated Distributed Training ==="
-        accelerate launch --config_file $ACCELERATE_CONFIG train_arithmetic.py \
-            --base-dir $BASE_DIR \
-            --data_path $DATASET \
-            --dataset_split $SPLIT \
-            --dataset_field "${FIELD[@]}" \
-            --model $BASE_MODEL \
-            --reweight-type $REWEIGHTING_TYPE \
-            --weight-regularization $REGULARIZATION_TYPE \
-            --weight-regularization-lambda $REGULARIZATION_LAMBDA \
-            --finetune-type $FINETUNE_TYPE \
-            --lora_r $LORA_RANK \
-            --lora_alpha $LORA_RANK \
-            --lora_dropout $LORA_DROPOUT \
-            --sfa-update-freq $SFA_UPDATE_FREQ \
-            --sfa-beta $SFA_BETA \
-            --batch_size $BATCH_SIZE \
-            --epochs $EPOCHS \
-            --scheduler $SCHEDULER \
-            --weight_decay $WEIGHT_DECAY \
-            --warmup_ratio $WARMUP_RATIO \
-            --max_seq_length $MAX_SEQ_LEN \
-            --lr $LR \
-            --seed $SEED \
-            --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
-            --gradient-checkpointing $GRADIENT_CHECKPOINTING \
-            --device "cuda" \
-            --project-name $WANDB_PROJECT \
-            --no-wandb $NO_WANDB \
-            --run-name $WAND_RUN
+        if [ -z "$ACCELERATE_CONFIG" ]; then
+            echo "=== Starting Training ==="
+            python train_arithmetic.py \
+                --base-dir $BASE_DIR \
+                --data_path $DATASET \
+                --dataset_split $SPLIT \
+                --dataset_field "${FIELD[@]}" \
+                --model $BASE_MODEL \
+                --reweight-type $REWEIGHTING_TYPE \
+                --weight-regularization $REGULARIZATION_TYPE \
+                --weight-regularization-lambda $REGULARIZATION_LAMBDA \
+                --beta $BETA \
+                --finetune-type $FINETUNE_TYPE \
+                --lora_r $LORA_RANK \
+                --lora_alpha $LORA_RANK \
+                --lora_dropout $LORA_DROPOUT \
+                --sfa-update-freq $SFA_UPDATE_FREQ \
+                --sfa-beta $SFA_BETA \
+                --batch_size $BATCH_SIZE \
+                --epochs $EPOCHS \
+                --scheduler $SCHEDULER \
+                --weight_decay $WEIGHT_DECAY \
+                --warmup_ratio $WARMUP_RATIO \
+                --max_seq_length $MAX_SEQ_LEN \
+                --lr $LR \
+                --seed $SEED \
+                --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
+                --gradient-checkpointing $GRADIENT_CHECKPOINTING \
+                --device "cuda" \
+                --project-name $WANDB_PROJECT \
+                --no-wandb $NO_WANDB \
+                --run-name $WAND_RUN
+        else
+            echo "=== Starting Accelerated Distributed Training ==="
+            accelerate launch --config_file $ACCELERATE_CONFIG train_arithmetic.py \
+                --base-dir $BASE_DIR \
+                --data_path $DATASET \
+                --dataset_split $SPLIT \
+                --dataset_field "${FIELD[@]}" \
+                --model $BASE_MODEL \
+                --reweight-type $REWEIGHTING_TYPE \
+                --weight-regularization $REGULARIZATION_TYPE \
+                --weight-regularization-lambda $REGULARIZATION_LAMBDA \
+                --beta $BETA \
+                --finetune-type $FINETUNE_TYPE \
+                --lora_r $LORA_RANK \
+                --lora_alpha $LORA_RANK \
+                --lora_dropout $LORA_DROPOUT \
+                --sfa-update-freq $SFA_UPDATE_FREQ \
+                --sfa-beta $SFA_BETA \
+                --batch_size $BATCH_SIZE \
+                --epochs $EPOCHS \
+                --scheduler $SCHEDULER \
+                --weight_decay $WEIGHT_DECAY \
+                --warmup_ratio $WARMUP_RATIO \
+                --max_seq_length $MAX_SEQ_LEN \
+                --lr $LR \
+                --seed $SEED \
+                --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
+                --gradient-checkpointing $GRADIENT_CHECKPOINTING \
+                --device "cuda" \
+                --project-name $WANDB_PROJECT \
+                --no-wandb $NO_WANDB \
+                --run-name $WAND_RUN
+        fi
     fi
-else
-    if [ -z "$ACCELERATE_CONFIG" ]; then
-        echo "=== Starting Training ==="
-        python train_arithmetic.py \
-            --base-dir $BASE_DIR \
-            --data_path $DATASET \
-            --dataset_split $SPLIT \
-            --dataset_field "${FIELD[@]}" \
-            --model $BASE_MODEL \
-            --reweight-type $REWEIGHTING_TYPE \
-            --weight-regularization $REGULARIZATION_TYPE \
-            --weight-regularization-lambda $REGULARIZATION_LAMBDA \
-            --finetune-type $FINETUNE_TYPE \
-            --lora_r $LORA_RANK \
-            --lora_alpha $LORA_RANK \
-            --lora_dropout $LORA_DROPOUT \
-            --sfa-update-freq $SFA_UPDATE_FREQ \
-            --sfa-beta $SFA_BETA \
-            --batch_size $BATCH_SIZE \
-            --epochs $EPOCHS \
-            --scheduler $SCHEDULER \
-            --weight_decay $WEIGHT_DECAY \
-            --warmup_ratio $WARMUP_RATIO \
-            --max_seq_length $MAX_SEQ_LEN \
-            --lr $LR \
-            --seed $SEED \
-            --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
-            --gradient-checkpointing $GRADIENT_CHECKPOINTING \
-            --device "cuda" \
-            --project-name $WANDB_PROJECT \
-            --no-wandb $NO_WANDB \
-            --run-name $WAND_RUN
-    else
-        echo "=== Starting Accelerated Distributed Training ==="
-        accelerate launch --config_file $ACCELERATE_CONFIG train_arithmetic.py \
-            --base-dir $BASE_DIR \
-            --data_path $DATASET \
-            --dataset_split $SPLIT \
-            --dataset_field "${FIELD[@]}" \
-            --model $BASE_MODEL \
-            --reweight-type $REWEIGHTING_TYPE \
-            --weight-regularization $REGULARIZATION_TYPE \
-            --weight-regularization-lambda $REGULARIZATION_LAMBDA \
-            --finetune-type $FINETUNE_TYPE \
-            --lora_r $LORA_RANK \
-            --lora_alpha $LORA_RANK \
-            --lora_dropout $LORA_DROPOUT \
-            --sfa-update-freq $SFA_UPDATE_FREQ \
-            --sfa-beta $SFA_BETA \
-            --batch_size $BATCH_SIZE \
-            --epochs $EPOCHS \
-            --scheduler $SCHEDULER \
-            --weight_decay $WEIGHT_DECAY \
-            --warmup_ratio $WARMUP_RATIO \
-            --max_seq_length $MAX_SEQ_LEN \
-            --lr $LR \
-            --seed $SEED \
-            --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS \
-            --gradient-checkpointing $GRADIENT_CHECKPOINTING \
-            --device "cuda" \
-            --project-name $WANDB_PROJECT \
-            --no-wandb $NO_WANDB \
-            --run-name $WAND_RUN
-    fi
-fi
+done

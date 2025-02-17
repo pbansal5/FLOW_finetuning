@@ -5,14 +5,15 @@ import torch.distributed as dist
 from transformers import Trainer
 
 class WeightedLossTrainer(Trainer):
-    def __init__(self, loss_type, weight_regularization="none", base_model=None, reg_lambda=0.01, ignore_index = -100, *args, **kwargs):
+    def __init__(self, loss_type, weight_regularization="none", base_model=None, reg_lambda=0.01, beta=0.01, ignore_index = -100, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        assert loss_type in ["sequence", "token", "none"]
+        assert loss_type in ["sequence", "token", "ref_logprobs", "none"]
         self.loss_type = loss_type
         self.ignore_index = ignore_index
         self.weight_regularization = weight_regularization
         self.base_model = base_model
         self.reg_lambda = reg_lambda
+        self.beta = beta
 
     
 
@@ -51,6 +52,12 @@ class WeightedLossTrainer(Trainer):
             token_weights[padding_mask.bool().squeeze(-1)] = 0.0 # This is need to avoid over normalizing the loss
 
             weighted_nll_loss = nll_loss * token_weights[:, :, None]
+            loss = weighted_nll_loss.sum() / num_items_in_batch
+
+        elif self.loss_type == "ref_logprobs":
+            ref_logprobs = inputs.pop("ref_logprobs")
+
+            weighted_nll_loss = -torch.nn.functional.logsigmoid(self.beta*(- nll_loss.sum(dim=(-2,-1)) + ref_logprobs))/self.beta
             loss = weighted_nll_loss.sum() / num_items_in_batch
         elif self.loss_type == "none": # TODO: Check if this is correct
             loss = nll_loss.sum() / num_items_in_batch
@@ -148,7 +155,7 @@ class SFATrainer(Trainer):
                 model.module.load_state_dict(current_state)
             else:
                 model.load_state_dict(current_state)
-            
+
             if dist.is_initialized():
                 dist.barrier()
             

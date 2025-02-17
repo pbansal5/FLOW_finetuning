@@ -13,22 +13,22 @@
 # Source conda environment and move to project directory
 
 source $WORK/miniconda3/install/bin/activate flow
-cd /work/09753/hprairie/ls6/projects/FLOW_finetuning/language
+cd /u/pbansal/flow/FLOW_finetuning/language
 
 # NOTE: This script expects a single NODE to be used for analysis
 # Job Configuration
 
-export CUDA_VISIBLE_DEVICES='0' # Specify which GPU to use
+export CUDA_VISIBLE_DEVICES='1,2,3,4,5,6,7' # Specify which GPU to use
 
 DATASET="meta-math/MetaMathQA" # CHANGE ME
 SPLIT="train" # CHANGE ME
 FIELD=("query" "response") # CHANGE ME
 
-MODEL="experiments/instruction_tuning/gemma-2-2b/20250109_131557_gemma-2-2b__r64__lr2e-05__train_train/final_model" # Path to rewighter model (HF/Local)
-TOKENIZER="experiments/instruction_tuning/gemma-2-2b/20250109_131557_gemma-2-2b__r64__lr2e-05__train_train/tokenizer" # Path to tokenizer (HF/Local)
+MODEL="meta-llama/Llama-3.2-1B" # Path to rewighter model (HF/Local)
+TOKENIZER="meta-llama/Llama-3.2-1B" # Path to tokenizer (HF/Local)
 
 BASE_DIR="data" # The base directory for the reweighted dataset
-RUN_NAME="Gemma-2-2b-Base" # An additional tag to add to the run name
+RUN_NAME="llama3.2" # An additional tag to add to the run name
 
 LOSS_TYPE="both" # both, sequence, or token
 # TEMPERATURE=0.31209245 # Temperature to use for token weighting
@@ -40,7 +40,7 @@ TEMPERATURE=0.0643
 BATCH_SIZE=8 # Adjust as needed based on memory constraints
 MAX_SEQ_LEN=1024 # Be sure to be consistent through experiments
 DEBUG=false # true or false (Will turn off distributed training)
-USE_SLURM=true # true or false (Will use SLURM for distributed training)
+USE_SLURM=false # true or false (Will use SLURM for distributed training)
 VALIDATE_DATESET=true # true or false (Will validate each sample of the dataset)
 
 #### ~~~~~~~~ Do not modify below this line ~~~~~~~~ ####

@@ -13,11 +13,11 @@
 # Source conda environment and move to project directory
 
 source $WORK/miniconda3/install/bin/activate flow
-cd /work/09753/hprairie/ls6/projects/FLOW_finetuning/language
+cd /u/pbansal/flow/FLOW_finetuning/language
 
 # NOTE: This script expects a single NODE to be used for analysis
 # Job Configuration
-export CUDA_VISIBLE_DEVICES='0' # Specify which GPU to use
+export CUDA_VISIBLE_DEVICES='1,2,3,4,5,6,7' # Specify which GPU to use
 
 DATASET="meta-math/MetaMathQA" # CHANGE ME
 SPLIT="train" # CHANGE ME
@@ -25,8 +25,9 @@ FIELD=("query" "response") # CHANGE ME
 
 # Note Either set the (RUN_DIR) or set (MODEL_PATH, TOKENIZER, and SAVE_PATH)
 # RUN_DIR will always take priority
-RUN_DIR="experiments/instruction_tuning/Llama-3.2-3B/20250123_221031_Llama-3.2-3B__r256__lr5e-06__train_train" # CHANGE ME
-
+# RUN_DIR=" " # CHANGE ME
+# RUN_DIR="experiments/instruction_tuning/Llama-3.2-3B/20250123_221031_Llama-3.2-3B__r256__lr5e-06__train_train" # CHANGE ME
+ 
 MODEL_PATH="meta-llama/Llama-3.2-1B" # CHANGE ME
 TOKENIZER="meta-llama/Llama-3.2-1B" # CHANGE ME
 SAVE_PATH="meta-math/MetaMathQA" # CHANGE ME
@@ -36,7 +37,7 @@ LOSS_TYPE="both" # both, sequence, or token
 BATCH_SIZE=4 # Adjust as needed
 MAX_SEQ_LEN=1024 # Be sure to be consistent through experiments
 DEBUG=false # true or false (Will turn off distributed training)
-USE_SLURM=true # true or false (Will use SLURM for distributed training)
+USE_SLURM=false # true or false (Will use SLURM for distributed training)
 
 #### ~~~~~~~~ Do not modify below this line ~~~~~~~~ ####
 if [ "$USE_SLURM" = true ]; then
@@ -76,13 +77,13 @@ if [ "$DEBUG" = false ] && [ $NUM_GPUS -gt 1 ]; then
         --dataset-split $SPLIT \
         --dataset-field "${FIELD[@]}" \
         --save-path $SAVE_PATH \
-        --run-dir $RUN_DIR \
         --model $MODEL_PATH \
         --tokenizer $TOKENIZER \
         --loss-type $LOSS_TYPE \
         --bs $BATCH_SIZE \
         --max-seq-length $MAX_SEQ_LEN \
-        --device "cuda"
+        --device "cuda" \
+        # --run-dir $RUN_DIR \
 else
     echo "=== Starting Analysis ==="
     python get_dataset_temperature.py \
@@ -90,11 +91,11 @@ else
         --dataset-split $SPLIT \
         --dataset-field "${FIELD[@]}" \
         --save-path $SAVE_PATH \
-        --run-dir $RUN_DIR \
         --model $MODEL_PATH \
         --tokenizer $TOKENIZER \
         --loss-type $LOSS_TYPE \
         --bs $BATCH_SIZE \
         --max-seq-length $MAX_SEQ_LEN \
-        --device "cuda"
+        --device "cuda" \
+        # --run-dir $RUN_DIR \
 fi

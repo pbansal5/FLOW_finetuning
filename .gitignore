@@ -1,3 +1,4 @@
+language/data/
 language/experiments/
 language/wandb/
 **/__pycache__/

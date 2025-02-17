@@ -15,6 +15,7 @@ from models import create_model_tokenizer_it
 class WeightedDataset(Dataset):
     def __init__(self, original_dataset):
         self.dataset = original_dataset
+        self.ref_logprobs = torch.zeros(len(original_dataset))
         self.sequence_weights = torch.zeros(len(original_dataset))
         self.token_weights = [[] for _ in range(len(original_dataset))]
     
@@ -23,14 +24,17 @@ class WeightedDataset(Dataset):
     
     def __getitem__(self, idx):
         item = self.dataset[idx]
+        item['ref_logprobs'] = self.ref_logprobs[idx]
         item['sequence_weights'] = self.sequence_weights[idx]
         item['token_weights'] = self.token_weights[idx]
         item['index'] = idx
         return item
     
-    def set_weights(self, indices, sequence_weights=None, token_weights=None):
+    def set_weights(self, indices, ref_logprobs=None, sequence_weights=None, token_weights=None):
         for i, idx in enumerate(indices):
             if 0 <= idx < len(self.dataset):
+                if ref_logprobs is not None:
+                    self.ref_logprobs[idx] = ref_logprobs[i]
                 if sequence_weights is not None:
                     self.sequence_weights[idx] = sequence_weights[i]
                 if token_weights is not None:
@@ -40,6 +44,7 @@ class WeightedDataset(Dataset):
         data = {
             "input_ids": [self.dataset[idx]["input_ids"] for idx in range(len(self))],
             "labels": [self.dataset[idx]["labels"] for idx in range(len(self))],
+            "ref_logprobs": self.ref_logprobs.tolist(),
             "sequence_weights": self.sequence_weights.tolist(),
             "token_weights": self.token_weights,
         }
@@ -121,7 +126,7 @@ def process_batch(batch, model, tokenizer, args):
             if torch.isnan(token_weights).any():
                 print("Token Weights contain NaNs")
                 token_weights = torch.nan_to_num(token_weights, nan=0.0)
-            
+
             token_weights_list = []
             for weight, mask in zip(token_weights, attention_mask[:, :-1]):
                 token_weights_list.append(weight[mask.bool()].cpu().tolist())
@@ -134,6 +139,17 @@ def process_batch(batch, model, tokenizer, args):
             sequence_weights = torch.exp(-sequence_losses/args.temperature)
             token_weights = torch.exp(-token_losses/args.temperature)
 
+
+            log_probs = -torch.nn.functional.log_softmax(shift_logits, dim=-1)
+            if shift_labels.dim() == log_probs.dim() - 1:
+                shift_labels_expanded = shift_labels.unsqueeze(-1)
+            else : 
+                shift_labels_expanded = shift_labels
+            shift_labels_expanded_clamped = torch.clamp(shift_labels_expanded, min=0)
+            nll_loss = log_probs.gather(dim=-1, index=shift_labels_expanded_clamped)
+            nll_loss.masked_fill_(shift_labels_expanded.eq(IGNORE_INDEX), 0.0)
+            ref_logprobs = nll_loss.sum(dim=(-2,-1))
+
             # Set to zero if Nan
             if torch.isnan(sequence_weights).any():
                 print("Sequence Weights contain NaNs")
@@ -141,13 +157,17 @@ def process_batch(batch, model, tokenizer, args):
             if torch.isnan(token_weights).any():
                 print("Token Weights contain NaNs")
                 token_weights = torch.nan_to_num(token_weights, nan=0.0)
+            if torch.isnan(ref_logprobs).any():
+                print("Ref LogProbs Weights contain NaNs")
+                ref_logprobs = torch.nan_to_num(ref_logprobs, nan=0.0)
 
+            ref_logprobs_list = ref_logprobs.cpu().tolist()
             sequence_weights_list = sequence_weights.cpu().tolist()
             token_weights_list = []
             for weight, mask in zip(token_weights, attention_mask[:, :-1]):
                 token_weights_list.append(weight[mask.bool()].cpu().tolist())
 
-            return sequence_weights_list, token_weights_list
+            return ref_logprobs_list, sequence_weights_list, token_weights_list
 
 def gather_batch(batch, rank, world_size, dst):
     if rank == dst:
@@ -185,8 +205,9 @@ def main(args):
     
     print(f"Starting Sample rewighting on rank {rank}...\n")
     for batch in tqdm(dataloader, disable=rank != 0):
-        sequence_weights, token_weights = process_batch(batch, model, tokenizer, args)
+        ref_logprobs , sequence_weights, token_weights = process_batch(batch, model, tokenizer, args)
 
+        batch["ref_logprobs"] = ref_logprobs
         batch["sequence_weights"] = sequence_weights
         batch["token_weights"] = token_weights
 
@@ -202,7 +223,7 @@ def main(args):
                 elif args.loss_type == "token":
                     train_dataset.set_weights(bat["index"], token_weights=bat["token_weights"])
                 else: # both
-                    train_dataset.set_weights(bat["index"], sequence_weights=bat["sequence_weights"], token_weights=bat["token_weights"])
+                    train_dataset.set_weights(bat["index"], ref_logprobs=bat["ref_logprobs"], sequence_weights=bat["sequence_weights"], token_weights=bat["token_weights"])
     
     # Synchronize processes
     if world_size > 1:
@@ -218,6 +239,8 @@ def main(args):
             collate_fn=data_collator,
         )
         for sample in tqdm(dataloader):
+            if args.loss_type in ["ref_logprobs", "both"]:
+                assert len(sample["ref_logprobs"]) == 1, print(sample["ref_logprobs"])
             if args.loss_type in ["sequence", "both"]:
                 assert len(sample["sequence_weights"]) == 1, print(sample["sequence_weights"])
             if args.loss_type in ["token", "both"]:

@@ -20,8 +20,6 @@ export CUDA_VISIBLE_DEVICES='0' # Specify which GPU to use
 
 # ===== Model Configuration ===== #
 BASE_MODEL="google/gemma-2-2b"
-# BASE_MODEL="$WORK/flow/floss_results/experiments/gemma-2-2b/20250323_055622_gemma-2-2b__r64__lr2e-05__ft_none__rw_none_beta_0.0_reg_none"
-# BASE_MODEL="$BASE_MODEL/final_model"
 FINETUNE_TYPE="full" # none, full, lora, linear-probe, sfa (none will freeze the entire model, which is useful for creating a baseline model)
 
 # ~~ LORA Configuration ~~ #
@@ -33,31 +31,32 @@ SFA_UPDATE_FREQ=0.25
 SFA_BETA=0.5
 
 # ===== Data Configuration ===== #
-DATASETS=("meta-math/MetaMathQA[:5000]") # \
+DATASETS=("$WORK/flow/FLOW_finetuning/language/data/samples_metamath_generate_2025-03-23T00-48-09.227201.jsonl/20250323_022404_samples_metamath_generate_2025-03-23T00-48-09.227201.jsonl__gemma2-2b__tp0.0643_l_both")
+# "meta-math/MetaMathQA[:50000]"
 # "/u/pbansal/flow/FLOW_finetuning/language/data/MetaMathQA/20250216_154342_MetaMathQA__llama3.2__tp0.0643_l_both" \
 # "/u/pbansal/flow/FLOW_finetuning/language/data/MetaMathQA/20250216_154342_MetaMathQA__llama3.2__tp0.0643_l_both") # Dataset to use (expects huggingface format or path)
 SPLIT="train" # Split to use (expects huggingface format)
 FIELD=("query" "response") # Field to use (expects list of two strings)
 
 # ===== Reweighting Variables ===== #
-REWEIGHTING_TYPES=("none")
+REWEIGHTING_TYPES=("ref_logprobs")
 # "ref_logprobs" "ref_logprobs") # Reweighting scheme either [sequence/token/ref_logprobs/none] (default trainer: none)
 
 # ===== Regularization Configuration ===== #
 # Note: Regularization only makes sense when using (full/linear-probe) finetuning
 REGULARIZATION_LAMBDA=1e-3 # Regularization lambda to use
 REGULARIZATION_TYPE="none" # Regularization type to use (none/l1/l2)
-BETAS=(0) # 1e-2 1e-3) # Sigmoid beta to use
+BETAS=(1e-3) # 1e-2 1e-3) # Sigmoid beta to use
 
 # ===== Training Configuration ===== #
-EPOCHS=3 # Number of epochs to train for
+EPOCHS=1 # Number of epochs to train for
 SCHEDULER="cosine" # Scheduler to use
 WEIGHT_DECAY=0.00 # Weight decay to use
 WARMUP_RATIO=0.03 # Warmup ratio to use
 LR=2e-5 # Learning rate to use
-BATCH_SIZE=2 # Batch size to use
+BATCH_SIZE=1 # Batch size to use
 MAX_SEQ_LEN=1024 # Maximum sequence length to use
-GRADIENT_ACCUMULATION_STEPS=8 # Gradient accumulation steps to use
+GRADIENT_ACCUMULATION_STEPS=1 # Gradient accumulation steps to use
 GRADIENT_CHECKPOINTING=false # Use gradient checkpointing to reduce memory usage
 SEED=42 # Seed to use
 # NOTE: If using Accelerate config, set the ACCELERATE_CONFIG variable other wise leave it as "" and DDP will be used in multi-gpu training
@@ -116,7 +115,7 @@ for i in "${!REWEIGHTING_TYPES[@]}"; do
 
         if [ -z "$ACCELERATE_CONFIG" ]; then
             echo "=== Starting Distributed Training ==="
-            torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${NUM_GPUS} train_arithmetic.py \
+            torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=${NUM_GPUS} train_dpo_arithmetic.py \
                 --base-dir $BASE_DIR \
                 --data_path $DATASET \
                 --dataset_split $SPLIT \
@@ -148,7 +147,7 @@ for i in "${!REWEIGHTING_TYPES[@]}"; do
                 --run-name $WAND_RUN
         else
             echo "=== Starting Accelerated Distributed Training ==="
-            accelerate launch --config_file $ACCELERATE_CONFIG train_arithmetic.py \
+            accelerate launch --config_file $ACCELERATE_CONFIG train_dpo_arithmetic.py \
                 --base-dir $BASE_DIR \
                 --data_path $DATASET \
                 --dataset_split $SPLIT \
@@ -182,7 +181,7 @@ for i in "${!REWEIGHTING_TYPES[@]}"; do
     else
         if [ -z "$ACCELERATE_CONFIG" ]; then
             echo "=== Starting Training ==="
-            python train_arithmetic.py \
+            python train_dpo_arithmetic.py \
                 --base-dir $BASE_DIR \
                 --data_path $DATASET \
                 --dataset_split $SPLIT \
@@ -214,7 +213,7 @@ for i in "${!REWEIGHTING_TYPES[@]}"; do
                 --run-name $WAND_RUN
         else
             echo "=== Starting Accelerated Distributed Training ==="
-            accelerate launch --config_file $ACCELERATE_CONFIG train_arithmetic.py \
+            accelerate launch --config_file $ACCELERATE_CONFIG train_dpo_arithmetic.py \
                 --base-dir $BASE_DIR \
                 --data_path $DATASET \
                 --dataset_split $SPLIT \

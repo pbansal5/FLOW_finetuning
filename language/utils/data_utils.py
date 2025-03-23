@@ -1,17 +1,20 @@
 import torch
 from torch.utils.data import DataLoader
-from datasets import load_dataset, load_from_disk
+from datasets import load_dataset, load_from_disk,Dataset
 import transformers
-from typing import Dict, Sequence, List
+from typing import Any, Dict, List, Optional, Union, Sequence
 import copy
 from dataclasses import dataclass
-from typing import Sequence
+import json 
 
 IGNORE_INDEX = -100
+# PROMPT = (
+#     "Below is an instruction that describes a task. "
+#     "Write a response that appropriately completes the request.\n\n"
+#     "### Instruction:\n{instruction}\n\n### Response:"
+# )
 PROMPT = (
-    "Below is an instruction that describes a task. "
-    "Write a response that appropriately completes the request.\n\n"
-    "### Instruction:\n{instruction}\n\n### Response:"
+    "Q: {instruction}\nA: Let's think step by step."
 )
 
 
@@ -161,6 +164,69 @@ class IndexedDataCollatorForSupervisedDataset(object):
         labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
         return dict(input_ids=input_ids, labels=labels, attention_mask=input_ids.ne(self.tokenizer.pad_token_id), index=index)
 
+@dataclass
+class IndexedDPODataCollatorForSupervisedDataset(object):
+    """Collate examples for supervised fine-tuning."""
+
+    tokenizer: transformers.PreTrainedTokenizer
+
+    def pad_to_length(self, tensor: torch.Tensor, length: int, pad_value: Union[int, float], dim: int = -1) -> torch.Tensor:
+        if tensor.size(dim) >= length:
+            return tensor
+        else:
+            pad_size = list(tensor.shape)
+            pad_size[dim] = length - tensor.size(dim)
+            return torch.cat(
+                [
+                    tensor,
+                    pad_value * torch.ones(*pad_size, dtype=tensor.dtype, device=tensor.device),
+                ],
+                dim=dim,
+            )
+
+    def concatenated_inputs(self, batch: Dict[str, Union[List, torch.LongTensor]]) -> Dict[str, torch.LongTensor]:
+        padding_value = self.tokenizer.pad_token_id
+        label_pad_token_id = IGNORE_INDEX
+        rejected_max_len = max([len(x) for x in batch["rejected_input_ids"]])
+        max_length = max(len(batch["chosen_input_ids"]), rejected_max_len)
+        concatenated_batch = {"index" : batch["index"]}
+        for k in batch:
+            if k.startswith("chosen") and (k.endswith("_input_ids") or k.endswith("_labels")):
+                pad_value = label_pad_token_id if "labels" in k else padding_value
+                concatenated_key = k.replace("chosen", "concatenated")
+                concatenated_batch[concatenated_key] = self.pad_to_length(torch.tensor(batch[k]), max_length, pad_value=pad_value)
+        for k in batch:
+            if k.startswith("rejected") and (k.endswith("_input_ids") or k.endswith("_labels")):
+                pad_value = label_pad_token_id if "labels" in k else padding_value
+                # concatenated_key = k.replace("rejected", "concatenated")
+                prefix = k.split("_")[0]
+                concatenated_key = "concatenated" + k[len(prefix):]
+                padded_tensor_of_rejected = torch.stack([
+                    self.pad_to_length(torch.tensor(batch[k][idx]), max_length, pad_value=pad_value)
+                    for idx in range(len(batch[k]))
+                ],dim=0)
+                
+                concatenated_batch[concatenated_key] = torch.cat(
+                    (
+                        concatenated_batch[concatenated_key][None,:],
+                        padded_tensor_of_rejected,
+                    ),
+                    dim=0,
+                )
+        return concatenated_batch
+
+    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
+        instances = [self.concatenated_inputs(instance) for instance in instances]
+        input_ids, labels = tuple([instance[key] for instance in instances] for key in ("concatenated_input_ids", "concatenated_labels"))
+        index = [instance["index"] for instance in instances]
+        # input_ids = [torch.tensor(x) for x in input_ids]
+        max_length = max([len(x[0]) for x in input_ids]) # each entry of x has same length.  
+        input_ids = torch.cat([self.pad_to_length(input_id,max_length,self.tokenizer.pad_token_id) for input_id in input_ids],dim=0,)
+        labels = torch.cat([self.pad_to_length(label,max_length,self.tokenizer.pad_token_id) for label in labels],dim=0,)
+        # labels = [torch.tensor(x) for x in labels]
+        # labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
+        return dict(input_ids=input_ids, labels=labels, attention_mask=input_ids.ne(self.tokenizer.pad_token_id), index=index)
+
 
 @dataclass
 class WeightedDataCollatorForSupervisedDataset(DataCollatorForSupervisedDataset):
@@ -230,6 +296,32 @@ def train_tokenize_function(examples, tokenizer, query, response):
     data_dict = preprocess(sources, targets, tokenizer)
     return data_dict
 
+def train_tokenize_function_dpo(examples, tokenizer, query, chosen, rejected):
+    queries = [PROMPT.format_map(dict(instruction=instruction)) for instruction in examples[query]]
+    chosen_targets = [f"{output}{tokenizer.eos_token}" for output in examples[chosen]]
+    data_chosen_dict = preprocess(queries, chosen_targets, tokenizer)
+    
+    # print ('in train tokenize ',examples)
+    
+    num_negs = len(examples[rejected][0])
+    data_rejected_dict_list = []
+    for idx in range(num_negs):
+        rejected_targets = [f"{output[idx]}{tokenizer.eos_token}" for output in examples[rejected]]
+        data_rejected_dict_list.append(preprocess(queries, rejected_targets, tokenizer))
+
+    rejected_input_ids = [data_rejected_dict['input_ids'] for data_rejected_dict in data_rejected_dict_list]
+    rejected_labels = [data_rejected_dict['labels'] for data_rejected_dict in data_rejected_dict_list]
+    transpose = lambda list_ : [[x[idx] for x in list_] for idx in range(len(list_[0]))]
+    rejected_input_ids = transpose(rejected_input_ids)
+    rejected_labels = transpose(rejected_labels)
+
+    data_dict = dict(chosen_input_ids=data_chosen_dict['input_ids'],
+                     chosen_labels=data_chosen_dict['labels'],
+                     rejected_input_ids=rejected_input_ids,
+                     rejected_labels=rejected_labels,
+    )
+    return data_dict
+
 
 def load_and_preprocess_it(tokenizer, args):
     path = args.data_path
@@ -274,6 +366,60 @@ def load_and_preprocess_it(tokenizer, args):
 
     return train_dataset
 
+
+def load_and_preprocess_dpo(tokenizer,args):
+    path = args.data_path
+    split_range = None
+    if "[" in path and path.endswith("]"):
+        main_path, range_str = path.split("[", 1)
+        range_str = range_str.rstrip("]")  # Remove the closing bracket
+        path = main_path  # Update path to the main dataset path
+
+        if range_str.startswith(":"):
+            start = 0
+            end = int(range_str[1:])
+            split_range = (start, end)
+        elif range_str.endswith(":"):
+            start = int(range_str[:-1])
+            split_range = (start, None)  # None indicates till the end
+        elif ":" in range_str:
+            start, end = range_str.split(":")
+            start = int(start) if start else 0
+            end = int(end) if end else None 
+            split_range = (start, end)
+
+    with open(path,'r') as f:
+        data = f.readlines()
+    json_data = [json.loads(x) for x in data]
+    raw_train_datasets = dict(query=[x['doc'][args.dataset_field[0]] for x in json_data],
+                              chosen=[x['doc'][args.dataset_field[1]] for x in json_data],
+                              rejected=[x['resps'][0] for x in json_data],
+                              )
+    raw_train_datasets = Dataset.from_dict(raw_train_datasets)
+
+
+    if split_range is not None:
+        start, end = split_range
+        if end is None:
+            raw_train_datasets = raw_train_datasets.select(range(start, len(raw_train_datasets)))
+        else:
+            raw_train_datasets = raw_train_datasets.select(range(start, end))
+
+    train_dataset = raw_train_datasets.map(
+        train_tokenize_function_dpo,
+        batched=True,
+        batch_size=3000,
+        num_proc=32,
+        remove_columns=raw_train_datasets.column_names,
+        load_from_cache_file=True,
+        desc="Running tokenizer on train dataset",
+        fn_kwargs={"tokenizer": tokenizer, 
+                   "query": "query", 
+                   "chosen": "chosen", 
+                   "rejected":"rejected"}
+    )
+
+    return train_dataset
 
 def load_weighted_it(args):
     path = args.data_path

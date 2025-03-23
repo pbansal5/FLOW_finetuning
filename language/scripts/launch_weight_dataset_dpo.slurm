@@ -19,8 +19,7 @@ cd $WORK/flow/FLOW_finetuning/language
 # Job Configuration
 
 export CUDA_VISIBLE_DEVICES='0' # Specify which GPU to use
-
-DATASET="meta-math/MetaMathQA" # CHANGE ME
+DATASET="$WORK/flow/floss_results/synthetic_data/metamath_generate/__work__09883__parikshitb52__vista__flow__floss_results__experiments__gemma-2-2b__20250219_221832_gemma-2-2b__r64__lr2e-05__ft_full__rw_none_beta_0.0_reg_none__final_model/samples_metamath_generate_2025-03-23T00-48-09.227201.jsonl"
 SPLIT="train" # CHANGE ME
 FIELD=("query" "response") # CHANGE ME
 
@@ -37,11 +36,12 @@ LOSS_TYPE="both" # both, sequence, or token
 TEMPERATURE=0.0643
 # TEMPERATURE=0.77839446
 
-BATCH_SIZE=16 # Adjust as needed based on memory constraints
+BATCH_SIZE=1 # Adjust as needed based on memory constraints
 MAX_SEQ_LEN=1024 # Be sure to be consistent through experiments
 DEBUG=false # true or false (Will turn off distributed training)
 USE_SLURM=false # true or false (Will use SLURM for distributed training)
 VALIDATE_DATESET=true # true or false (Will validate each sample of the dataset)
+DEVICE="cuda"
 
 #### ~~~~~~~~ Do not modify below this line ~~~~~~~~ ####
 if [ "$USE_SLURM" = true ]; then
@@ -71,7 +71,7 @@ if [ "$DEBUG" = false ] && [ $NUM_GPUS -gt 1 ]; then
     echo "Master Port: $MASTER_PORT"
 
     echo "=== Starting Distributed Data Weighting ==="
-    torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=$NUM_GPUS create_weighted_dataset.py \
+    torchrun --master_addr ${MASTER_ADDR} --master_port ${MASTER_PORT} --nproc_per_node=$NUM_GPUS create_dpo_dataset.py \
         --data-path $DATASET \
         --dataset-split $SPLIT \
         --dataset-field "${FIELD[@]}" \
@@ -84,10 +84,10 @@ if [ "$DEBUG" = false ] && [ $NUM_GPUS -gt 1 ]; then
         --bs $BATCH_SIZE \
         --max-seq-length $MAX_SEQ_LEN \
         --validate-dataset $VALIDATE_DATESET \
-        --device "cuda"
+        --device $DEVICE
 else
     echo "=== Starting Data Weighting ==="
-    python create_weighted_dataset.py \
+    python create_dpo_dataset.py \
         --data-path $DATASET \
         --dataset-split $SPLIT \
         --dataset-field "${FIELD[@]}" \
@@ -100,5 +100,6 @@ else
         --bs $BATCH_SIZE \
         --max-seq-length $MAX_SEQ_LEN \
         --validate-dataset $VALIDATE_DATESET \
-        --device "cuda"
+        --device $DEVICE
 fi
+

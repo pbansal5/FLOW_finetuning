@@ -23,21 +23,22 @@ export CUDA_VISIBLE_DEVICES='0' # Specify which GPUs to use
 export HF_ALLOW_CODE_EVAL="1" # Allow eval
 
 # RUN_DIRS is a list to all folders with runs
-
-# RUN_DIRS=("$WORK/flow/floss_results/experiments/gemma-2-2b/20250323_055036_gemma-2-2b__r64__lr2e-05__ft_full__rw_none_beta_0.0_reg_none")
-RUN_DIRS=("$WORK/flow/floss_results/experiments/gemma-2-2b/20250323_075945_gemma-2-2b__r64__lr2e-05__ft_full__rw_none_beta_0.0_reg_none")
+EXPT_DIR="$WORK/flow/floss_results/experiments"
+SD_DIR="$WORK/flow/floss_results/synthetic_data"
+RUN_DIRS=("gemma-2-2b/20250323_055036_gemma-2-2b__r64__lr2e-05__ft_full__rw_none_beta_0.0_reg_none")
+# RUN_DIRS=("gemma-2-2b/20250323_055622_gemma-2-2b__r64__lr2e-05__ft_none__rw_none_beta_0.0_reg_none")
 # If model being evaluated used LoRA then set to true to merge model and LoRA weights (i.e, false/true)
 # Use false if not using LoRA
-NEED_TO_MERGE=(false
-)
+NEED_TO_MERGE=(false)
 # If model being evaluated used LoRA then name the HuggingFace model path to merge weights (i.e., ""/"google/gemma-2-2b")
 # NOTE: Use "" if not using LoRA
-BASE_MODELS=("google/gemma-2-2b" 
-)
-TASKS="gsm8k,mmlu,arc_easy,arc_challenge,hellaswag,piqa,social_iqa,openbookqa,mbpp"
+BASE_MODELS=("google/gemma-2-2b")
+TASKS="metamath_generate"
+GEN_KWARGS="do_sample=true,temperature=0.7,top_p=0.9"
+# GEN_KWARGS="do_sample=false,temperature=0"
+NUM_SAMPLES=5000
 
-
-BATCH_SIZE=32
+BATCH_SIZE=64
 METHOD="normal" # (Type of model merging done) Options: normal
 WANDB_PROJECT="flow"
 
@@ -60,7 +61,7 @@ if [ ${#RUN_DIRS[@]} -ne ${#NEED_TO_MERGE[@]} ] || [ ${#RUN_DIRS[@]} -ne ${#BASE
 fi
 
 for i in "${!RUN_DIRS[@]}"; do
-    RUN_DIR="${RUN_DIRS[$i]}"
+    RUN_DIR="$EXPT_DIR/${RUN_DIRS[$i]}"
     GPU_IDX=$((i % NUM_GPUS))
     GPU_ID="${GPU_ARRAY[$GPU_IDX]}"
     MERGE="${NEED_TO_MERGE[$i]}"
@@ -69,20 +70,9 @@ for i in "${!RUN_DIRS[@]}"; do
     FINAL_MODEL_PATH="$RUN_DIR/final_model"
     FINAL_TOKENIZER_PATH="$RUN_DIR/tokenizer"
     MERGED_MODEL_PATH="$RUN_DIR/merged_model" # Only used if MERGE is true
-    DUMP_PATH="$RUN_DIR/eval_results"
+    DUMP_PATH="$SD_DIR/$TASKS"
     BASE_MODEL="${BASE_MODELS[$i]}"
 
-    # Check for wandb run ID file
-    WANDB_RUN_ID_FILE="$RUN_DIR/wandb_run_id.txt"
-    if [ ! -f "$WANDB_RUN_ID_FILE" ]; then
-        # Generate new run ID using timestamp and model name
-        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-        MODEL_NAME=$(basename "$RUN_DIR")
-        RUN_ID="${TIMESTAMP}_${MODEL_NAME}"
-        echo "$RUN_ID" > "$WANDB_RUN_ID_FILE"
-    else
-        RUN_ID=$(cat "$WANDB_RUN_ID_FILE")
-    fi
 
     if [ "$MERGE" = true ]; then
         echo "=== Starting Merging ==="
@@ -118,10 +108,13 @@ for i in "${!RUN_DIRS[@]}"; do
     CUDA_VISIBLE_DEVICES=$GPU_ID lm_eval --model hf \
         --model_args pretrained=$FINAL_MODEL_PATH,tokenizer=$FINAL_TOKENIZER_PATH,max_length=4096,trust_remote_code=True \
         --tasks $TASKS \
-        --wandb_args project=$WANDB_PROJECT,id=$RUN_ID \
         --output_path $DUMP_PATH \
         --trust_remote_code \
         --confirm_run_unsafe_code \
+        --cache_requests refresh\
+        --log_samples \
+        --limit $NUM_SAMPLES \
+        --gen_kwargs $GEN_KWARGS\
         --batch_size $BATCH_SIZE &
     
     # Wait for evaluation to finish if using all GPUs

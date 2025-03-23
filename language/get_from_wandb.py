@@ -17,9 +17,7 @@ def get_average(project_name, runs, tasks, name):
 
 project_name = "flow"
 runs = [
-     "8vxcvhnu", 
-     "963uuwyr",
-     "cj9btlb4",
+     "27dzy324", 
 ]
 
 get_average(

@@ -8,6 +8,8 @@ import json
 import wandb
 import torch.distributed as dist
 from accelerate import Accelerator
+from torch.utils.data import Dataset, DistributedSampler, DataLoader
+from tqdm import tqdm
 
 from utils.data_utils import (
     load_weighted_it,
@@ -19,7 +21,8 @@ from models import create_model_tokenizer_it, create_peft_model_it, IGNORE_INDEX
 from utils.misc import count_parameters
 from utils.trainer_utils import WeightedLossTrainer, SFATrainer
 from utils.parsing_utils import str_to_bool
-
+from utils.dpo_utils import DPODataCollatorForSupervisedDataset
+from utils.softmax_dpo_trainer import DPOTrainer
 
 def init_distributed():
     if dist.is_initialized():
@@ -128,7 +131,7 @@ def finetune():
     # Data handling
     if args.reweight_type != "none":
         train_dataset = load_weighted_it(args=args)
-        data_collator = WeightedDataCollatorForSupervisedDataset(tokenizer=tokenizer, loss_type=args.reweight_type)
+        data_collator = DPODataCollatorForSupervisedDataset(tokenizer=tokenizer)
         data_module = dict(train_dataset=train_dataset, data_collator=data_collator)
     else:
         train_dataset = load_and_preprocess_it(tokenizer=tokenizer, args=args)
@@ -204,11 +207,9 @@ def finetune():
                 **data_module,
             )
         else:
-            trainer = WeightedLossTrainer(
+            trainer = DPOTrainer(
                 model=model, 
                 args=training_args, 
-                loss_type=args.reweight_type, 
-                ignore_index=IGNORE_INDEX, 
                 beta=args.beta,
                 **data_module,
             )
